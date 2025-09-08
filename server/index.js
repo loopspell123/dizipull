@@ -67,9 +67,9 @@ const io = new Server(server, {
     origin: (origin, callback) => {
       const allowedOrigins = [
         process.env.CLIENT_URL || "http://localhost:5173",
-        process.env.CLIENT_URL_PROD || "https://digihub-frontend.onrender.com", 
+        process.env.CLIENT_URL_PROD || "https://digihub-fortend.onrender.com", 
         "https://digihub-backend-axps.onrender.com", // Backend URL
-        "https://digihub-frontend.onrender.com", // Frontend URL
+        "https://digihub-fortend.onrender.com", // Frontend URL
         "http://localhost:3000",
         "http://localhost:5173",
       ];

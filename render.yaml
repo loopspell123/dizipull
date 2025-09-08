@@ -13,11 +13,11 @@ services:
       - key: PORT
         value: 10000
       - key: CLIENT_URL
-        value: https://digihub-frontend.onrender.com
+        value: https://digihub-fortend.onrender.com
       - key: CLIENT_URL_PROD  
-        value: https://digihub-frontend.onrender.com
+        value: https://digihub-fortend.onrender.com
       - key: FRONTEND_URL
-        value: https://digihub-frontend.onrender.com
+        value: https://digihub-fortend.onrender.com
     # Add environment variables from dashboard:
     # - MONGODB_URI
     # - JWT_SECRET  

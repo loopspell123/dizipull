@@ -8,13 +8,13 @@ export default defineConfig(({ command, mode }) => {
     plugins: [react()],
     server: {
       port: 5173,
-      host: true, // Allow external connections
+      host: true,
       proxy: {
         '/api': {
           target: env.VITE_API_URL || 'http://localhost:3001',
           changeOrigin: true,
           secure: true,
-          ws: true, // Enable WebSocket proxying
+          ws: true,
         }
       }
     },
