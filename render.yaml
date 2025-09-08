@@ -1,0 +1,39 @@
+services:
+  # Backend service - deployed to dizihub-jv1r.onrender.com
+  - type: web
+    name: whatsapp-backend
+    env: node
+    plan: starter
+    buildCommand: npm install --production
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CLIENT_URL
+        value: https://dizihub.onrender.com
+      - key: CLIENT_URL_PROD  
+        value: https://dizihub.onrender.com
+      - key: FRONTEND_URL
+        value: https://dizihub.onrender.com
+    # Add environment variables from dashboard:
+    # - MONGODB_URI
+    # - JWT_SECRET  
+    # - DEFAULT_ADMIN_USERNAME
+    # - DEFAULT_ADMIN_EMAIL
+    # - DEFAULT_PASSWORD
+    
+  # Frontend service - deployed to dizihub.onrender.com  
+  - type: static
+    name: whatsapp-frontend
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://dizihub-jv1r.onrender.com
+      - key: VITE_WS_URL
+        value: https://dizihub-jv1r.onrender.com
+      - key: VITE_NODE_ENV
+        value: production
