@@ -1,5 +1,5 @@
 services:
-  # Backend service - deployed to dizihub-jv1r.onrender.com
+  # Backend service - deployed to digihub-backend-axps.onrender.com
   - type: web
     name: whatsapp-backend
     env: node
@@ -13,11 +13,11 @@ services:
       - key: PORT
         value: 10000
       - key: CLIENT_URL
-        value: https://dizihub.onrender.com
+        value: https://digihub-frontend.onrender.com
       - key: CLIENT_URL_PROD  
-        value: https://dizihub.onrender.com
+        value: https://digihub-frontend.onrender.com
       - key: FRONTEND_URL
-        value: https://dizihub.onrender.com
+        value: https://digihub-frontend.onrender.com
     # Add environment variables from dashboard:
     # - MONGODB_URI
     # - JWT_SECRET  

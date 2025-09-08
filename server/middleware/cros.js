@@ -2,8 +2,8 @@ import cors from 'cors';
 
 // Production domains
 const PRODUCTION_DOMAINS = [
-  'https://dizihub.onrender.com',
-  'https://dizihub-jv1r.onrender.com',
+  'https://digihub-frontend.onrender.com',
+  'https://digihub-backend-axps.onrender.com',
 ];
 
 // Development domains
