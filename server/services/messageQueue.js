@@ -151,7 +151,32 @@ class MessageQueue {
 
   async sendMessage(task) {
     const session = this.sessionManager.getSession(task.sessionId);
+    if (!session) {
+      throw new Error(`Session ${task.sessionId} not found`);
+    }
+    
     const { client } = session;
+    
+    // Check if client is still connected
+    try {
+      const clientInfo = await client.getState();
+      console.log(`🔍 Client state for ${task.sessionId}:`, clientInfo);
+      
+      if (clientInfo !== 'CONNECTED') {
+        throw new Error(`Client not connected. State: ${clientInfo}`);
+      }
+    } catch (error) {
+      console.error(`❌ Client health check failed for ${task.sessionId}:`, error.message);
+      
+      // Update session status
+      session.data.status = 'disconnected';
+      this.sessionManager.emitToUser(session.data.userId, 'session-disconnected', {
+        sessionId: task.sessionId,
+        reason: 'Client session closed during messaging'
+      });
+      
+      throw new Error(`WhatsApp session closed. Please reconnect session ${task.sessionId}.`);
+    }
     
     // Add timeout wrapper
     return await Promise.race([
@@ -163,14 +188,119 @@ class MessageQueue {
   }
 
   async _sendMessageInternal(client, task) {
-    if (task.mediaId) {
-      const upload = await Upload.findById(task.mediaId);
-      if (!upload) throw new Error('Media file not found');
+    try {
+      // Check if client is still connected
+      const clientInfo = await this._checkClientHealth(client, task.sessionId);
+      if (!clientInfo.isHealthy) {
+        throw new Error(`Client not healthy: ${clientInfo.reason}`);
+      }
+
+      if (task.mediaId) {
+        const upload = await Upload.findById(task.mediaId);
+        if (!upload) throw new Error('Media file not found');
+        
+        const media = MessageMedia.fromFilePath(upload.path);
+        return await client.sendMessage(task.groupId, media, { caption: task.message });
+      } else {
+        return await client.sendMessage(task.groupId, task.message);
+      }
+    } catch (error) {
+      // Handle specific WhatsApp session errors
+      if (error.message.includes('Session closed') || 
+          error.message.includes('Protocol error') ||
+          error.message.includes('Target closed') ||
+          error.message.includes('Client not healthy')) {
+        
+        console.error(`🔌 WhatsApp session lost for ${task.sessionId}:`, error.message);
+        
+        // Mark session as disconnected and attempt recovery
+        const session = this.sessionManager.getSession(task.sessionId);
+        if (session) {
+          session.data.status = 'reconnecting';
+          this.sessionManager.emitToUser(session.data.userId, 'session-status', {
+            sessionId: task.sessionId,
+            status: 'reconnecting',
+            message: 'WhatsApp session lost, attempting to recover...'
+          });
+          
+          // Try to recover the session
+          setTimeout(() => {
+            this._attemptSessionRecovery(task.sessionId, session.data.userId);
+          }, 3000);
+        }
+        
+        throw new Error('WhatsApp session was closed. Recovery in progress...');
+      }
       
-      const media = MessageMedia.fromFilePath(upload.path);
-      return await client.sendMessage(task.groupId, media, { caption: task.message });
-    } else {
-      return await client.sendMessage(task.groupId, task.message);
+      // Re-throw other errors
+      throw error;
+    }
+  }
+
+  // Check if WhatsApp client is healthy
+  async _checkClientHealth(client, sessionId) {
+    try {
+      // Try to get client info - if this fails, client is not healthy
+      const state = await Promise.race([
+        client.getState(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 5000)
+        )
+      ]);
+      
+      if (state === 'CONNECTED') {
+        return { isHealthy: true };
+      } else {
+        return { isHealthy: false, reason: `Client state: ${state}` };
+      }
+    } catch (error) {
+      return { isHealthy: false, reason: error.message };
+    }
+  }
+
+  // Attempt to recover a disconnected session
+  async _attemptSessionRecovery(sessionId, userId) {
+    try {
+      console.log(`🔄 Attempting recovery for session ${sessionId}`);
+      
+      // Get the session
+      const session = this.sessionManager.getSession(sessionId);
+      if (!session) {
+        console.log(`❌ Session ${sessionId} not found for recovery`);
+        return;
+      }
+
+      // Try to reinitialize the WhatsApp client
+      if (session.client) {
+        try {
+          // Check if client can be recovered
+          const state = await session.client.getState();
+          if (state === 'CONNECTED') {
+            console.log(`✅ Session ${sessionId} recovered successfully`);
+            session.data.status = 'connected';
+            this.sessionManager.emitToUser(userId, 'session-ready', {
+              sessionId,
+              status: 'connected',
+              message: 'Session recovered successfully'
+            });
+            return;
+          }
+        } catch (err) {
+          console.log(`⚠️ Client recovery failed for ${sessionId}: ${err.message}`);
+        }
+      }
+
+      // If recovery fails, mark session as needing QR code
+      console.log(`❌ Recovery failed for ${sessionId}, requiring QR code`);
+      session.data.status = 'disconnected';
+      this.sessionManager.emitToUser(userId, 'session-disconnected', {
+        sessionId,
+        reason: 'Session recovery failed. Please scan QR code again.',
+        requiresQR: true
+      });
+
+    } catch (error) {
+      console.error(`❌ Session recovery error for ${sessionId}:`, error);
     }
   }
 

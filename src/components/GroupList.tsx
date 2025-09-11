@@ -96,24 +96,24 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
   }, []);
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-gray-700">
+      <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-3">
-            <Smartphone className="h-6 w-6 text-blue-400" />
+            <Smartphone className="h-6 w-6 text-blue-500" />
             <div>
-              <h3 className="text-lg font-semibold text-white">
+              <h3 className="text-lg font-semibold text-black">
                 {currentSession.phoneNumber || currentSession.id}
               </h3>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-gray-600">
                 {currentSession.groups.length} groups • {selectedCount} selected
               </p>
             </div>
           </div>
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-2 text-gray-400 hover:text-white transition-colors"
+            className="p-2 text-gray-600 hover:text-black transition-colors"
           >
             {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
           </button>
@@ -129,14 +129,14 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
                 placeholder="Search groups..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full bg-white border border-gray-200 rounded-lg pl-10 pr-4 py-3 text-black placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
 
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <Filter className="h-5 w-5 text-gray-400" />
-                <span className="text-sm text-gray-400">Sort by:</span>
+                <Filter className="h-5 w-5 text-gray-600" />
+                <span className="text-sm text-gray-600">Sort by:</span>
 
                 <div className="flex space-x-2">
                   {[
@@ -149,8 +149,8 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
                       onClick={() => handleSort(option.key as typeof sortBy)}
                       className={`px-3 py-1 text-sm rounded-lg transition-colors ${
                         sortBy === option.key
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
                       {option.label}
@@ -167,9 +167,9 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
                   type="checkbox"
                   checked={showSelectedOnly}
                   onChange={(e) => setShowSelectedOnly(e.target.checked)}
-                  className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+                  className="rounded border-gray-300 bg-white text-blue-500 focus:ring-blue-500"
                 />
-                <span className="text-sm text-gray-400">Selected only</span>
+                <span className="text-sm text-gray-600">Selected only</span>
               </label>
             </div>
           </div>
@@ -179,13 +179,13 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
       {/* Groups List */}
       {isExpanded && (
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-700">
-            <thead className="bg-gray-800">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left">
                   <input
                     type="checkbox"
-                    className="rounded bg-gray-700 border-gray-600 cursor-pointer"
+                    className="rounded bg-white border-gray-300 cursor-pointer"
                     checked={
                       currentSession.groups.length > 0 &&
                       selectedCount === currentSession.groups.length
@@ -194,36 +194,36 @@ const GroupList: React.FC<GroupListProps> = ({ session }) => {
                   />
                 </th>
                 <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer"
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider cursor-pointer"
                   onClick={() => handleSort('name')}
                 >
                   Name
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase">
                   Size
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase">
                   Last Activity
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase">
                   Tags
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-gray-800 divide-y divide-gray-700">
+            <tbody className="bg-white divide-y divide-gray-200">
               {filteredGroups.map((group) => (
-                <tr key={group.id} className="hover:bg-gray-700">
+                <tr key={group.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <input
                       type="checkbox"
-                      className="rounded bg-gray-700 border-gray-600 cursor-pointer"
+                      className="rounded bg-white border-gray-300 cursor-pointer"
                       checked={group.isSelected}
                       onChange={() => handleGroupToggle(group.id)}
                     />
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-300">{group.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-300">{group.participantCount}</td>
-                  <td className="px-6 py-4 text-sm text-gray-300">
+                  <td className="px-6 py-4 text-sm text-black">{group.name}</td>
+                  <td className="px-6 py-4 text-sm text-black">{group.participantCount}</td>
+                  <td className="px-6 py-4 text-sm text-black">
                     {formatLastActivity(group.lastActivity)}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-300">

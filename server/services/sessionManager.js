@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { safeDate } from '../utils/dateHelper.js';
+import { performNetworkCheck } from '../utils/networkCheck.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,384 +13,221 @@ const __dirname = path.dirname(__filename);
 class SessionManager {
   constructor(io) {
     this.io = io;
-    this.activeSessions = new Map();
+    this.sessions = new Map(); // Single session storage
     this.userSockets = new Map();
-    this.qrTimeouts = new Map();
-    this.reconnectTimers = new Map();
+    this.timeouts = new Map(); // All timeouts in one place
   }
 
-  // Add graceful logout method (doesn't delete files)
-  async gracefulLogout(sessionId, reason = 'logout') {
-    console.log(`🚪 Graceful logout for ${sessionId} (${reason})`);
-    
-    try {
-      const session = this.getSession(sessionId);
-      if (!session) {
-        console.log(`⚠️ Session ${sessionId} not found for logout`);
-        return;
-      }
-
-      // Update session status
-      session.data.status = 'logging_out';
-
-      // Clear timeouts
-      if (this.qrTimeouts.has(sessionId)) {
-        clearTimeout(this.qrTimeouts.get(sessionId));
-        this.qrTimeouts.delete(sessionId);
-      }
-
-      if (this.reconnectTimers.has(sessionId)) {
-        clearTimeout(this.reconnectTimers.get(sessionId));
-        this.reconnectTimers.delete(sessionId);
-      }
-
-      // Gracefully disconnect client without destroying auth data
-      if (session.client) {
-        try {
-          // Just disconnect, don't logout (preserves session files)
-          await Promise.race([
-            session.client.pupPage?.close(),
-            new Promise(resolve => setTimeout(resolve, 3000))
-          ]);
-          console.log(`✅ Client disconnected gracefully for ${sessionId}`);
-        } catch (error) {
-          console.warn(`⚠️ Warning during graceful disconnect of ${sessionId}:`, error.message);
-        }
-      }
-
-      // Update session status but keep it in memory for quick reconnect
-      session.data.status = 'disconnected';
-      session.data.lastActivity = new Date();
-
-      // Update database
-      if (Session) {
-        await Session.findOneAndUpdate(
-          { sessionId, userId: session.data.userId },
-          { 
-            status: 'disconnected', 
-            lastActivity: new Date(),
-            updatedAt: new Date()
-          }
-        ).catch(console.error);
-      }
-
-      // Emit to user
-      this.io.to(`user_${session.data.userId}`).emit('session-logged-out', {
-        sessionId,
-        reason,
-        canReconnect: true
-      });
-
-      console.log(`✅ Graceful logout completed for ${sessionId}`);
-
-    } catch (error) {
-      console.error(`❌ Graceful logout error for ${sessionId}:`, error);
-      throw error;
-    }
-  }
-
-  // Add force disconnect method
-  async forceDisconnect(sessionId, reason = 'force_disconnect') {
-    console.log(`⚡ Force disconnect for ${sessionId} (${reason})`);
-    
-    try {
-      const session = this.getSession(sessionId);
-      if (!session) {
-        console.log(`⚠️ Session ${sessionId} not found for force disconnect`);
-        return;
-      }
-
-      // Clear all timeouts immediately
-      if (this.qrTimeouts.has(sessionId)) {
-        clearTimeout(this.qrTimeouts.get(sessionId));
-        this.qrTimeouts.delete(sessionId);
-      }
-
-      if (this.reconnectTimers.has(sessionId)) {
-        clearTimeout(this.reconnectTimers.get(sessionId));
-        this.reconnectTimers.delete(sessionId);
-      }
-
-      // Force close client
-      if (session.client) {
-        try {
-          // Force close browser pages
-          if (session.client.pupPage) {
-            await session.client.pupPage.close().catch(() => {});
-          }
-          if (session.client.pupBrowser) {
-            await session.client.pupBrowser.close().catch(() => {});
-          }
-        } catch (error) {
-          console.warn(`⚠️ Warning during force disconnect of ${sessionId}:`, error.message);
-        }
-      }
-
-      // Remove from active sessions
-      this.activeSessions.delete(sessionId);
-
-      // Update database
-      if (Session) {
-        await Session.findOneAndUpdate(
-          { sessionId, userId: session.data.userId },
-          { 
-            status: 'force_disconnected', 
-            lastActivity: new Date(),
-            updatedAt: new Date()
-          }
-        ).catch(console.error);
-      }
-
-      // Emit to user
-      this.io.to(`user_${session.data.userId}`).emit('session-force-disconnected', {
-        sessionId,
-        reason
-      });
-
-      console.log(`✅ Force disconnect completed for ${sessionId}`);
-
-    } catch (error) {
-      console.error(`❌ Force disconnect error for ${sessionId}:`, error);
-      throw error;
-    }
-  }
-
-  // Main method called from index.js
+  // Main session creation method
   async createSession(sessionId, userId, socket, options = {}) {
     const { persistent = true } = options;
     
     try {
-      console.log(`🚀 Creating WhatsApp session: ${sessionId} for user: ${userId} (persistent: ${persistent})`);
+      console.log(`🚀 Creating WhatsApp session: ${sessionId} for user: ${userId}`);
 
-      // Check if session already exists
-      if (this.activeSessions.has(sessionId)) {
-        console.log(`⚠️ Session ${sessionId} already active, using existing session`);
-        const existingSession = this.activeSessions.get(sessionId);
-        
-        // Update socket reference
-        if (socket) {
-          this.userSockets.set(userId, socket);
-        }
-        
-        // Emit current status
-        socket?.emit('session-status', {
-          sessionId,
-          status: existingSession.data.status,
-          phoneNumber: existingSession.data.phoneNumber
-        });
-        
-        return existingSession;
+      // Check basic internet connectivity (but don't fail on WhatsApp Web check)
+      const networkStatus = await performNetworkCheck();
+      if (!networkStatus.internet) {
+        throw new Error(`No internet connectivity detected`);
+      }
+      
+      if (!networkStatus.whatsapp) {
+        console.log(`⚠️ WhatsApp Web accessibility check failed, but proceeding with session creation`);
       }
 
-      // Ensure sessions directory exists
-      const sessionsDir = path.join(process.cwd(), 'sessions');
-      if (!fs.existsSync(sessionsDir)) {
-        fs.mkdirSync(sessionsDir, { recursive: true });
+      // Check session limits
+      const userSessions = this.getUserSessions(userId);
+      if (userSessions.length >= 3) {
+        throw new Error('Maximum 3 sessions per user allowed. Please delete an existing session first.');
       }
 
-      // Save session to database immediately
+      // Clean up existing session with same ID
+      if (this.sessions.has(sessionId)) {
+        console.log(`⚠️ Destroying existing session: ${sessionId}`);
+        await this.destroySession(sessionId);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Save session to database with error handling
       if (Session) {
-        await Session.findOneAndUpdate(
-          { sessionId, userId },
-          { 
-            sessionId, 
-            userId, 
-            status: 'initializing',
-            persistent,
-            lastActivity: new Date(),
-            updatedAt: new Date()
-          },
-          { upsert: true, new: true }
-        );
+        try {
+          await Session.findOneAndUpdate(
+            { sessionId, userId },
+            { 
+              sessionId, 
+              userId, 
+              status: 'initializing',
+              persistent,
+              lastActivity: new Date(),
+              updatedAt: new Date()
+            },
+            { upsert: true, new: true, timeout: 5000 }
+          );
+        } catch (dbError) {
+          console.warn(`⚠️ Database save failed for ${sessionId}:`, dbError.message);
+          // Continue without database - session will work in memory
+        }
       }
 
-      // Create WhatsApp Web.js client with better error handling
+      // Create WhatsApp client with improved stability and network handling
       const client = new Client({
         authStrategy: new LocalAuth({
           clientId: sessionId,
           dataPath: './sessions'
         }),
         puppeteer: {
-          headless: 'new',
-          timeout: 60000,
+          headless: true,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-extensions',
+            '--no-first-run',
+            '--disable-default-apps',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
-            '--no-first-run',
-            '--disable-default-apps'
-          ]
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--enable-features=NetworkService,NetworkServiceLogging',
+            '--force-color-profile=srgb',
+            '--metrics-recording-only',
+            '--no-crash-upload',
+            '--enable-automation',
+            '--password-store=basic',
+            '--use-mock-keychain',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-gpu',
+            '--single-process',
+            '--disable-background-networking',
+            '--disable-sync'
+          ],
+          timeout: 60000,
+          handleSIGINT: false,
+          handleSIGTERM: false,
+          handleSIGHUP: false
         }
       });
 
+      // Create session data
       const sessionData = {
-        id: sessionId,
-        userId: userId,
-        status: 'initializing',
-        phoneNumber: null,
-        groups: [],
-        messagesSent: 0,
-        lastActivity: new Date(),
-        clientInfo: null,
-        persistent
-      };
-
-      const session = {
         client: client,
-        data: sessionData
+        data: {
+          sessionId,
+          userId,
+          status: 'initializing',
+          phoneNumber: null,
+          groups: [],
+          messagesSent: 0,
+          lastActivity: new Date(),
+          persistent,
+          qrRetries: 0,
+          authFailures: 0
+        }
       };
 
-      this.activeSessions.set(sessionId, session);
-      this.setupEventHandlers(sessionId, client, socket, userId);
-      
-      console.log(`📱 Initializing WhatsApp client for ${sessionId}`);
-      
-      // Initialize with timeout
-      await Promise.race([
-        client.initialize(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Client initialization timeout')), 120000)
-        )
-      ]);
+      this.sessions.set(sessionId, sessionData);
+      this.userSockets.set(userId, socket);
 
-      return session;
+      // Set initialization timeout (increased to 3 minutes for better reliability)
+      const initTimeout = setTimeout(() => {
+        console.log(`⏰ Initialization timeout for ${sessionId}`);
+        const session = this.sessions.get(sessionId);
+        if (session && session.data.status !== 'waiting_scan' && session.data.status !== 'connected') {
+          // Only timeout if still in initializing/retrying state
+          session.data.status = 'timeout';
+          this.emitToUser(userId, 'session-error', {
+            sessionId,
+            error: 'Session initialization timeout - please try again'
+          });
+          // Clean up the session
+          setTimeout(() => this.destroySession(sessionId), 1000);
+        }
+      }, 180000); // 180 seconds (3 minutes)
+
+      this.timeouts.set(`${sessionId}_init`, initTimeout);
+
+      // Setup event handlers
+      this.setupEventHandlers(sessionId, client, userId);
+      
+      // Initialize client with network check
+      try {
+        await this.initializeWithRetry(client, sessionId, userId);
+      } catch (initError) {
+        console.error(`❌ Failed to initialize ${sessionId} after retries:`, initError.message);
+        // Update session status but don't immediately destroy - let timeout handle cleanup
+        const session = this.sessions.get(sessionId);
+        if (session) {
+          session.data.status = 'init_failed';
+          this.emitToUser(userId, 'session-error', {
+            sessionId,
+            error: `Initialization failed: ${initError.message}`
+          });
+        }
+      }
+
+      return sessionData;
 
     } catch (error) {
       console.error(`❌ Error creating session ${sessionId}:`, error);
       
       // Cleanup on error
-      this.activeSessions.delete(sessionId);
-      
-      // Update database status
-      if (Session) {
-        await Session.findOneAndUpdate(
-          { sessionId, userId },
-          { status: 'error', updatedAt: new Date() }
-        ).catch(console.error);
-      }
+      this.sessions.delete(sessionId);
+      this.clearTimeouts(sessionId);
       
       throw error;
     }
   }
 
-  // Add session restoration method
-  async restoreSession(sessionId, userId, socket = null) {
-    try {
-      console.log(`🔄 Restoring session: ${sessionId}`);
-
-      // Check if session exists in database
-      const sessionDoc = await Session.findOne({ sessionId, userId });
-      if (!sessionDoc) {
-        throw new Error('Session not found in database');
-      }
-
-      // Check if already active
-      if (this.activeSessions.has(sessionId)) {
-        console.log(`✅ Session ${sessionId} already active`);
-        return this.activeSessions.get(sessionId);
-      }
-
-      // Create WhatsApp client with existing auth
-      const client = new Client({
-        authStrategy: new LocalAuth({
-          clientId: sessionId,
-          dataPath: './sessions'
-        }),
-        puppeteer: {
-          headless: 'new',
-          timeout: 0,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-extensions'
-          ]
-        }
-      });
-
-      const sessionData = {
-        id: sessionId,
-        userId: userId,
-        status: 'connecting',
-        phoneNumber: sessionDoc.phoneNumber,
-        groups: sessionDoc.groups || [],
-        messagesSent: sessionDoc.messagesSent || 0,
-        lastActivity: new Date(),
-        clientInfo: sessionDoc.clientInfo,
-        persistent: sessionDoc.persistent
-      };
-
-      const session = {
-        client: client,
-        data: sessionData
-      };
-
-      this.activeSessions.set(sessionId, session);
-      this.setupEventHandlers(sessionId, client, socket, userId);
-
-      // Initialize without QR (should use existing auth)
-      await client.initialize();
-
-      return session;
-
-    } catch (error) {
-      console.error(`❌ Error restoring session ${sessionId}:`, error);
-      // Update database status
-      await Session.findOneAndUpdate(
-        { sessionId, userId },
-        { status: 'error', updatedAt: new Date() }
-      ).catch(console.error);
-      
-      throw error;
-    }
-  }
-
-  // Setup WhatsApp Web.js event handlers - This is the key part for QR generation
-  setupEventHandlers(sessionId, client, socket, userId) {
+  // Setup WhatsApp event handlers
+  setupEventHandlers(sessionId, client, userId) {
     
-    // QR Code generation - This was missing!
+    // QR Code generation
     client.on('qr', async (qr) => {
-      console.log(`📱 QR Code generated for ${sessionId}`);
       try {
+        console.log(`📱 QR Code generated for ${sessionId}`);
+        
         const qrCodeDataUrl = await QRCode.toDataURL(qr, {
           width: 256,
           margin: 2,
           color: { dark: '#000000', light: '#FFFFFF' }
         });
 
-        const session = this.getSession(sessionId);
+        const session = this.sessions.get(sessionId);
         if (session) {
+          // Clear any existing QR timeout to prevent duplicates
+          this.clearTimeout(`${sessionId}_qr`);
+          
           session.data.status = 'waiting_scan';
           session.data.qrCode = qrCodeDataUrl;
+          session.data.qrRetries++;
+          session.data.lastActivity = new Date();
 
-          // Emit QR code to client
-          const qrData = {
+          // Clear init timeout when QR is generated (connection is working)
+          this.clearTimeout(`${sessionId}_init`);
+
+          console.log(`✅ QR code ready for ${sessionId} (attempt ${session.data.qrRetries})`);
+
+          // Emit QR code
+          this.emitToUser(userId, 'qr-code', {
             sessionId,
             qrCode: qrCodeDataUrl,
-            status: 'waiting_scan',
-            timestamp: Date.now()
-          };
+            status: 'waiting_scan', // Use consistent status
+            retries: session.data.qrRetries
+          });
 
-          console.log(`📡 Emitting QR code for session ${sessionId}`);
-          this.io.to(`user_${userId}`).emit('qr-code', qrData);
-          
-          if (socket && socket.connected) {
-            socket.emit('qr-code', qrData);
-          }
-
-          // Set QR timeout
-          if (this.qrTimeouts.has(sessionId)) {
-            clearTimeout(this.qrTimeouts.get(sessionId));
-          }
-          
-          this.qrTimeouts.set(sessionId, setTimeout(() => {
+          // Set QR timeout (5 minutes for better user experience)
+          const qrTimeout = setTimeout(() => {
             console.log(`⏰ QR expired for ${sessionId}`);
-            this.io.to(`user_${userId}`).emit('qr-expired', { sessionId });
-          }, 45000)); // 45 second timeout
+            const currentSession = this.sessions.get(sessionId);
+            if (currentSession && currentSession.data.status === 'waiting_scan') {
+              currentSession.data.status = 'qr_expired';
+              this.emitToUser(userId, 'qr-expired', { sessionId });
+            }
+          }, 300000); // 5 minutes
+
+          this.timeouts.set(`${sessionId}_qr`, qrTimeout);
         }
 
       } catch (error) {
@@ -398,188 +235,184 @@ class SessionManager {
       }
     });
 
+    // Authentication success
     client.on('authenticated', async () => {
       console.log(`✅ ${sessionId} authenticated`);
-      const session = this.getSession(sessionId);
+      
+      const session = this.sessions.get(sessionId);
       if (session) {
         session.data.status = 'authenticated';
+        session.data.lastActivity = new Date();
+        
+        this.clearTimeout(`${sessionId}_qr`);
         
         // Update database
-        await Session.findOneAndUpdate(
-          { sessionId, userId },
-          { status: 'authenticated', updatedAt: new Date() }
-        ).catch(console.error);
+        await this.updateSessionInDB(sessionId, { status: 'authenticated' });
+
+        this.emitToUser(userId, 'session-authenticated', { sessionId });
         
-        this.io.to(`user_${userId}`).emit('session-authenticated', { sessionId });
+        // Send updated sessions list to user
+        this.sendUpdatedSessionsToUser(userId);
       }
     });
 
+    // Client ready
     client.on('ready', async () => {
       console.log(`🚀 ${sessionId} ready and connected`);
       
-      const session = this.activeSessions.get(sessionId);
+      const session = this.sessions.get(sessionId);
       if (session) {
-        session.data.status = 'connected';
-        session.data.phoneNumber = client.info?.wid?.user || 'Unknown';
-        session.data.clientInfo = {
-          platform: client.info?.platform || 'unknown',
-          pushName: client.info?.pushname || 'Unknown',
-          battery: client.info?.battery || 0
-        };
-        session.data.lastActivity = new Date();
+        try {
+          session.data.status = 'connected';
+          session.data.phoneNumber = client.info?.wid?.user || 'Unknown';
+          session.data.lastActivity = new Date();
 
-        // Update database
-        await Session.findOneAndUpdate(
-          { sessionId, userId },
-          { 
+          // Update database
+          await this.updateSessionInDB(sessionId, {
             status: 'connected',
-            phoneNumber: session.data.phoneNumber,
-            clientInfo: session.data.clientInfo,
-            lastActivity: new Date(),
-            updatedAt: new Date()
-          }
-        ).catch(console.error);
+            phoneNumber: session.data.phoneNumber
+          });
 
-        // Clear QR timeout
-        if (this.qrTimeouts.has(sessionId)) {
-          clearTimeout(this.qrTimeouts.get(sessionId));
-          this.qrTimeouts.delete(sessionId);
-        }
+          this.emitToUser(userId, 'session-ready', {
+            sessionId,
+            status: 'connected',
+            phoneNumber: session.data.phoneNumber
+          });
 
-        // Emit session ready
-        this.io.to(`user_${userId}`).emit('session-ready', {
-          sessionId,
-          status: 'connected',
-          phoneNumber: session.data.phoneNumber,
-          clientInfo: session.data.clientInfo,
-          restored: true
-        });
+          // Send updated sessions list to user
+          this.sendUpdatedSessionsToUser(userId);
 
-        // Fetch groups after a delay
-        setTimeout(async () => {
-          try {
-            await this.fetchAndSaveGroups(sessionId, client);
-          } catch (error) {
-            console.error(`❌ Error fetching groups for ${sessionId}:`, error);
-          }
-        }, 5000);
-      }
-    });
+          // Start health monitoring for connected session
+          this.startHealthMonitoring(sessionId, userId);
 
-    client.on('disconnected', async (reason) => {
-      console.log(`🔌 Session ${sessionId} disconnected: ${reason}`);
-      const session = this.getSession(sessionId);
-      if (session) {
-        session.data.status = 'disconnected';
-        
-        // Update database but keep persistent flag
-        await Session.findOneAndUpdate(
-          { sessionId, userId },
-          { status: 'disconnected', updatedAt: new Date() }
-        ).catch(console.error);
-        
-        this.io.to(`user_${userId}`).emit('session-disconnected', { sessionId, reason });
-
-        // Auto-reconnect persistent sessions
-        if (session.data.persistent) {
-          console.log(`🔄 Scheduling reconnect for persistent session ${sessionId}`);
+          // Fetch groups after delay
           setTimeout(async () => {
             try {
-              await this.restoreSession(sessionId, userId);
+              await this.fetchGroups(sessionId);
             } catch (error) {
-              console.error(`❌ Auto-reconnect failed for ${sessionId}:`, error);
+              console.error(`❌ Error fetching groups for ${sessionId}:`, error);
             }
-          }, 30000); // Reconnect after 30 seconds
+          }, 3000);
+
+          // Start periodic health check for this session
+          this.startHealthCheck(sessionId, userId);
+
+        } catch (error) {
+          console.error(`❌ Error in ready handler for ${sessionId}:`, error);
         }
       }
     });
 
-    client.on('auth_failure', (msg) => {
-      console.log(`❌ Auth failed for ${sessionId}: ${msg}`);
-      const session = this.getSession(sessionId);
+    // Disconnection
+    client.on('disconnected', async (reason) => {
+      console.log(`🔌 ${sessionId} disconnected: ${reason}`);
+      
+      const session = this.sessions.get(sessionId);
       if (session) {
-        session.data.status = 'error';
-        this.io.to(`user_${userId}`).emit('session-error', { 
+        session.data.status = 'disconnected';
+        session.data.lastActivity = new Date();
+        
+        await this.updateSessionInDB(sessionId, { status: 'disconnected' });
+        
+        this.emitToUser(userId, 'session-disconnected', { sessionId, reason });
+      }
+    });
+
+    // Error handling
+    client.on('error', async (error) => {
+      console.log(`❌ Client error for ${sessionId}:`, error.message);
+      
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        // Check for network connectivity errors
+        if (error.message.includes('ERR_SOCKET_NOT_CONNECTED') || 
+            error.message.includes('ERR_NETWORK_CHANGED') ||
+            error.message.includes('ERR_INTERNET_DISCONNECTED')) {
+          
+          console.log(`🌐 Network connectivity issue detected for ${sessionId}`);
+          session.data.status = 'network_error';
+          
+          this.emitToUser(userId, 'session-error', { 
+            sessionId, 
+            error: 'Network connectivity issue. Please check your internet connection and try again.' 
+          });
+          
+          // Retry after network delay
+          setTimeout(() => {
+            console.log(`🔄 Retrying ${sessionId} after network error`);
+            this.retrySession(sessionId, userId);
+          }, 5000);
+          
+        } else {
+          session.data.status = 'error';
+          this.emitToUser(userId, 'session-error', { 
+            sessionId, 
+            error: `Client error: ${error.message}` 
+          });
+        }
+      }
+    });
+
+    // Authentication failure
+    client.on('auth_failure', async (msg) => {
+      console.log(`❌ Auth failed for ${sessionId}: ${msg}`);
+      
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.data.status = 'auth_failure';
+        session.data.authFailures++;
+        
+        this.emitToUser(userId, 'session-error', { 
           sessionId, 
           error: `Authentication failed: ${msg}` 
         });
+
+        // Remove session after 3 failures
+        if (session.data.authFailures >= 3) {
+          console.log(`💀 Removing ${sessionId} after 3 auth failures`);
+          await this.destroySession(sessionId);
+        }
       }
     });
   }
 
-  // Get session
-  getSession(sessionId) {
-    return this.activeSessions.get(sessionId);
-  }
-
-  // Get user sessions
-  getUserSessions(userId) {
-    return Array.from(this.activeSessions.values())
-      .filter(session => session.data.userId === userId)
-      .map(session => ({
-        id: session.data.id,
-        status: session.data.status,
-        phoneNumber: session.data.phoneNumber,
-        groupCount: session.data.groups?.length || 0,
-        messagesSent: session.data.messagesSent || 0,
-        lastActivity: session.data.lastActivity
-      }));
-  }
-
-  // Enhanced fetchAndSaveGroups with safe date handling
-  async fetchAndSaveGroups(sessionId, client) {
+  // Fetch WhatsApp groups
+  async fetchGroups(sessionId) {
     try {
       console.log(`🔍 Fetching groups for ${sessionId}`);
       
-      const chats = await client.getChats();
+      const session = this.sessions.get(sessionId);
+      if (!session || !session.client) {
+        throw new Error('Session or client not found');
+      }
+
+      const chats = await session.client.getChats();
       const groups = chats
         .filter(chat => chat.isGroup && chat.name)
         .map(group => ({
           id: group.id._serialized,
           name: group.name,
           participantCount: group.participants?.length || 0,
-          lastActivity: safeDate(group.timestamp), // Use safe date helper
+          lastActivity: group.timestamp || Date.now(),
           unreadCount: group.unreadCount || 0,
-          description: group.description || '',
           isSelected: false
         }))
         .sort((a, b) => b.lastActivity - a.lastActivity);
 
       console.log(`📚 Found ${groups.length} groups for ${sessionId}`);
 
-      // Update session in memory
-      const session = this.getSession(sessionId);
-      if (session) {
-        session.data.groups = groups;
-        
-        // Save groups to database with better error handling
-        try {
-          await Session.findOneAndUpdate(
-            { sessionId, userId: session.data.userId },
-            { 
-              groups,
-              updatedAt: new Date()
-            },
-            { 
-              upsert: false,
-              runValidators: true,
-              new: true
-            }
-          );
-          console.log(`💾 Successfully saved ${groups.length} groups to database for ${sessionId}`);
-        } catch (dbError) {
-          console.error(`❌ Database save error for ${sessionId}:`, dbError.message);
-          // Groups are still available in memory even if DB save fails
-        }
-        
-        // Emit groups to user
-        this.io.to(`user_${session.data.userId}`).emit('groups-loaded', {
-          sessionId,
-          groups,
-          phoneNumber: session.data.phoneNumber,
-          timestamp: new Date()
-        });
-      }
+      // Update session
+      session.data.groups = groups;
+      
+      // Update database
+      await this.updateSessionInDB(sessionId, { groups });
+      
+      // Emit to user
+      this.emitToUser(session.data.userId, 'groups-loaded', {
+        sessionId,
+        groups,
+        phoneNumber: session.data.phoneNumber
+      });
 
       return groups;
 
@@ -589,42 +422,460 @@ class SessionManager {
     }
   }
 
-  // Cleanup session
-  async cleanupSession(sessionId, reason = 'manual') {
-    console.log(`🧹 Cleaning up ${sessionId} (${reason})`);
-    
+  // Logout session (keep session alive)
+  async logoutSession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
     try {
-      // Clear timeouts first
-      if (this.qrTimeouts.has(sessionId)) {
-        clearTimeout(this.qrTimeouts.get(sessionId));
-        this.qrTimeouts.delete(sessionId);
+      console.log(`👋 Logging out session: ${sessionId}`);
+      
+      // Just disconnect, don't destroy
+      if (session.client && session.data.status === 'connected') {
+        await session.client.logout();
       }
 
-      if (this.reconnectTimers.has(sessionId)) {
-        clearTimeout(this.reconnectTimers.get(sessionId));
-        this.reconnectTimers.delete(sessionId);
-      }
+      // Update status to disconnected
+      session.data.status = 'disconnected';
+      session.data.groups = [];
+      session.data.lastActivity = new Date();
 
-      const session = this.getSession(sessionId);
-      if (session && session.client) {
+      await this.updateSessionInDB(sessionId, { status: 'disconnected' });
+
+      this.emitToUser(session.data.userId, 'session-logged-out', {
+        sessionId,
+        status: 'disconnected',
+        message: 'Session logged out. You can reconnect by scanning QR code.'
+      });
+
+      return true;
+
+    } catch (error) {
+      console.error(`❌ Error logging out session ${sessionId}:`, error);
+      throw error;
+    }
+  }
+
+  // Destroy session completely
+  async destroySession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      console.log(`⚠️ Session ${sessionId} not found for destruction`);
+      return;
+    }
+
+    try {
+      console.log(`🗑️ Destroying session: ${sessionId}`);
+
+      // Clear all timeouts
+      this.clearTimeouts(sessionId);
+
+      // Destroy client
+      if (session.client) {
         try {
-          // Don't call logout() to avoid file deletion issues
-          // Just destroy the client connection
           await Promise.race([
             session.client.destroy(),
             new Promise(resolve => setTimeout(resolve, 5000))
           ]);
         } catch (error) {
-          console.warn(`Warning during cleanup of ${sessionId}:`, error.message);
+          console.warn(`Warning destroying client ${sessionId}:`, error.message);
         }
       }
 
-      this.activeSessions.delete(sessionId);
+      // Remove from memory
+      this.sessions.delete(sessionId);
+
+      // Update database
+      await this.updateSessionInDB(sessionId, { status: 'destroyed' });
+
+      // Emit removal event
+      this.emitToUser(session.data.userId, 'session-destroyed', {
+        sessionId,
+        message: 'Session destroyed successfully'
+      });
+
+      console.log(`✅ Session ${sessionId} destroyed`);
+
+    } catch (error) {
+      console.error(`❌ Error destroying session ${sessionId}:`, error);
+      // Force remove even on error
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  // Disconnect session (soft disconnect)
+  async disconnectSession(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      console.log(`⚠️ Session ${sessionId} not found for disconnection`);
+      return false;
+    }
+
+    try {
+      console.log(`🔌 Disconnecting session: ${sessionId}`);
+
+      // Clear timeouts but keep session data
+      this.clearTimeouts(sessionId);
+
+      // Disconnect client
+      if (session.client) {
+        try {
+          await Promise.race([
+            session.client.logout(),
+            new Promise(resolve => setTimeout(resolve, 3000))
+          ]);
+        } catch (error) {
+          console.warn(`Warning disconnecting client ${sessionId}:`, error.message);
+        }
+      }
+
+      // Update status but keep in memory
+      session.data.status = 'disconnected';
+      session.data.lastActivity = new Date();
+
+      // Update database
+      await this.updateSessionInDB(sessionId, { 
+        status: 'disconnected',
+        lastActivity: new Date()
+      });
+
+      // Emit disconnection event
+      this.emitToUser(session.data.userId, 'session-disconnected', {
+        sessionId,
+        message: 'Session disconnected successfully'
+      });
+
+      console.log(`✅ Session ${sessionId} disconnected`);
+      return true;
+
+    } catch (error) {
+      console.error(`❌ Error disconnecting session ${sessionId}:`, error);
+      return false;
+    }
+  }
+
+  // Helper methods
+  getUserSessions(userId) {
+    const userSessions = [];
+    for (const [sessionId, session] of this.sessions) {
+      if (session.data.userId === userId) {
+        userSessions.push({
+          id: sessionId, // Frontend compatibility
+          sessionId, // Backend consistency
+          ...session.data
+        });
+      }
+    }
+    return userSessions;
+  }
+
+  getSession(sessionId) {
+    return this.sessions.get(sessionId);
+  }
+
+  clearTimeout(key) {
+    if (this.timeouts.has(key)) {
+      const timeout = this.timeouts.get(key);
+      if (typeof timeout === 'number') {
+        clearTimeout(timeout);
+      } else {
+        // Handle interval for health checks
+        clearInterval(timeout);
+      }
+      this.timeouts.delete(key);
+    }
+  }
+
+  clearTimeouts(sessionId) {
+    const keys = [`${sessionId}_init`, `${sessionId}_qr`, `${sessionId}_reconnect`, `${sessionId}_health`];
+    keys.forEach(key => this.clearTimeout(key));
+  }
+
+  emitToUser(userId, event, data) {
+    this.io.to(`user_${userId}`).emit(event, data);
+    
+    // Also emit to user's socket if available
+    const userSocket = this.userSockets.get(userId);
+    if (userSocket && userSocket.connected) {
+      userSocket.emit(event, data);
+    }
+  }
+
+  async updateSessionInDB(sessionId, updates) {
+    try {
+      const session = this.sessions.get(sessionId);
+      if (session && Session) {
+        await Promise.race([
+          Session.findOneAndUpdate(
+            { sessionId, userId: session.data.userId },
+            { ...updates, updatedAt: new Date() }
+          ),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Database timeout')), 10000)
+          )
+        ]);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Database update failed for ${sessionId}:`, error.message);
+      // Continue without database - session will work in memory
+    }
+  }
+
+  // Session statistics
+  getSessionStats() {
+    const stats = {
+      total: this.sessions.size,
+      byStatus: {},
+      activeConnections: 0
+    };
+
+    for (const [sessionId, session] of this.sessions) {
+      const status = session.data.status;
+      stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
+      
+      if (status === 'connected') {
+        stats.activeConnections++;
+      }
+    }
+
+    return stats;
+  }
+
+  // Initialize client with retry logic for network issues
+  async initializeWithRetry(client, sessionId, userId, retryCount = 0) {
+    const maxRetries = 3;
+    
+    try {
+      console.log(`🔄 Initializing ${sessionId} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      await client.initialize();
+    } catch (error) {
+      console.error(`❌ Initialization failed for ${sessionId}:`, error.message);
+      
+      if (retryCount < maxRetries && 
+          (error.message.includes('ERR_SOCKET_NOT_CONNECTED') || 
+           error.message.includes('ERR_NETWORK_CHANGED') ||
+           error.message.includes('ERR_INTERNET_DISCONNECTED'))) {
+        
+        console.log(`🔄 Retrying ${sessionId} in ${(retryCount + 1) * 2} seconds...`);
+        
+        const session = this.sessions.get(sessionId);
+        if (session) {
+          session.data.status = 'retrying';
+          this.emitToUser(userId, 'session-status', { 
+            sessionId, 
+            status: 'retrying',
+            message: `Network error. Retrying in ${(retryCount + 1) * 2} seconds...`
+          });
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        return this.initializeWithRetry(client, sessionId, userId, retryCount + 1);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  // Retry a session after network error
+  async retrySession(sessionId, userId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    
+    try {
+      console.log(`🔄 Retrying session ${sessionId} after network error`);
+      session.data.status = 'retrying';
+      
+      this.emitToUser(userId, 'session-status', { 
+        sessionId, 
+        status: 'retrying',
+        message: 'Retrying connection...'
+      });
+      
+      // Destroy and recreate the client
+      if (session.client) {
+        try {
+          await session.client.destroy();
+        } catch (err) {
+          console.log(`⚠️ Error destroying client during retry: ${err.message}`);
+        }
+      }
+      
+      // Wait a moment before recreating
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Recreate session
+      await this.createSession(sessionId, userId, this.userSockets.get(userId), {
+        persistent: session.data.persistent
+      });
       
     } catch (error) {
-      console.error(`❌ Cleanup error for ${sessionId}:`, error);
-      // Force remove from active sessions even on error
-      this.activeSessions.delete(sessionId);
+      console.error(`❌ Error retrying session ${sessionId}:`, error);
+      
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.data.status = 'error';
+        this.emitToUser(userId, 'session-error', { 
+          sessionId, 
+          error: `Retry failed: ${error.message}` 
+        });
+      }
+    }
+  }
+
+  // Cleanup method
+  async performCleanup() {
+    console.log('🧹 Performing session cleanup...');
+    
+    const now = Date.now();
+    const sessionsToCleanup = [];
+
+    for (const [sessionId, session] of this.sessions) {
+      const lastActivity = session.data.lastActivity?.getTime() || now;
+      const age = now - lastActivity;
+      
+      // Clean up sessions older than 24 hours and disconnected
+      const isOldAndDisconnected = age > (24 * 60 * 60 * 1000) && 
+                                   session.data.status !== 'connected';
+      
+      if (isOldAndDisconnected) {
+        sessionsToCleanup.push(sessionId);
+      }
+    }
+
+    for (const sessionId of sessionsToCleanup) {
+      await this.destroySession(sessionId);
+    }
+
+    console.log(`🧹 Cleaned up ${sessionsToCleanup.length} sessions`);
+  }
+
+  // Periodic health check for connected sessions
+  startHealthCheck(sessionId, userId) {
+    const healthCheckInterval = setInterval(async () => {
+      try {
+        const session = this.sessions.get(sessionId);
+        if (!session || session.data.status !== 'connected') {
+          console.log(`🏥 Stopping health check for ${sessionId} - session not connected`);
+          clearInterval(healthCheckInterval);
+          return;
+        }
+
+        // Check if client is still responsive
+        const client = session.client;
+        const state = await Promise.race([
+          client.getState(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Health check timeout')), 5000)
+          )
+        ]);
+
+        if (state !== 'CONNECTED') {
+          console.log(`🚨 Health check failed for ${sessionId} - state: ${state}`);
+          
+          session.data.status = 'disconnected';
+          await this.updateSessionInDB(sessionId, { status: 'disconnected' });
+          
+          this.emitToUser(userId, 'session-disconnected', { 
+            sessionId, 
+            reason: `Connection lost - state: ${state}` 
+          });
+          
+          clearInterval(healthCheckInterval);
+        } else {
+          console.log(`💚 Health check passed for ${sessionId}`);
+        }
+
+      } catch (error) {
+        console.error(`🚨 Health check error for ${sessionId}:`, error.message);
+        
+        const session = this.sessions.get(sessionId);
+        if (session) {
+          session.data.status = 'disconnected';
+          await this.updateSessionInDB(sessionId, { status: 'disconnected' });
+          
+          this.emitToUser(userId, 'session-disconnected', { 
+            sessionId, 
+            reason: `Health check failed: ${error.message}` 
+          });
+        }
+        
+        clearInterval(healthCheckInterval);
+      }
+    }, 60000); // Check every 60 seconds
+
+    // Store health check interval for cleanup
+    this.timeouts.set(`${sessionId}_health`, healthCheckInterval);
+  }
+
+  // Start health monitoring for a connected session
+  startHealthMonitoring(sessionId, userId) {
+    // Clear any existing health check
+    this.clearTimeout(`${sessionId}_health`);
+    
+    const healthCheckInterval = setInterval(async () => {
+      try {
+        const session = this.sessions.get(sessionId);
+        if (!session || session.data.status !== 'connected') {
+          clearInterval(healthCheckInterval);
+          return;
+        }
+
+        // Check if client is still responsive
+        const client = session.client;
+        if (client) {
+          try {
+            const state = await Promise.race([
+              client.getState(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Health check timeout')), 10000)
+              )
+            ]);
+            
+            if (state !== 'CONNECTED') {
+              console.log(`⚠️ Session ${sessionId} health check failed: state = ${state}`);
+              session.data.status = 'disconnected';
+              this.emitToUser(userId, 'session-disconnected', {
+                sessionId,
+                reason: 'WhatsApp session became disconnected'
+              });
+              clearInterval(healthCheckInterval);
+            } else {
+              console.log(`✅ Session ${sessionId} health check passed`);
+              // Keep session active by getting contacts (lightweight operation)
+              try {
+                await client.getContacts();
+              } catch (keepAliveError) {
+                console.log(`⚠️ Keep-alive failed for ${sessionId}: ${keepAliveError.message}`);
+              }
+            }
+          } catch (error) {
+            console.log(`❌ Session ${sessionId} health check error: ${error.message}`);
+            session.data.status = 'disconnected';
+            this.emitToUser(userId, 'session-disconnected', {
+              sessionId,
+              reason: 'WhatsApp session health check failed'
+            });
+            clearInterval(healthCheckInterval);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Health monitoring error for ${sessionId}:`, error);
+      }
+    }, 60000); // Check every minute
+
+    this.timeouts.set(`${sessionId}_health`, healthCheckInterval);
+  }
+
+  // Send updated sessions list to user
+  sendUpdatedSessionsToUser(userId) {
+    try {
+      const userSessions = this.getUserSessions(userId);
+      this.emitToUser(userId, 'sessions-data', userSessions);
+      console.log(`📊 Sent ${userSessions.length} sessions to user ${userId}`);
+    } catch (error) {
+      console.error(`❌ Error sending sessions to user ${userId}:`, error.message);
     }
   }
 }

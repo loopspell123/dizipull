@@ -141,7 +141,16 @@ const CampaignComposer: React.FC = () => {
       setIsSending(false);
       setSendingProgress({ sent: 0, total: 0, currentGroup: '' });
       
-      showError('Campaign Failed', `Campaign failed: ${data.error || 'Unknown error'}`);
+      // Provide more specific error messages
+      let errorMessage = data.error || 'Unknown error occurred';
+      let errorTitle = 'Campaign Failed';
+      
+      if (data.currentStatus) {
+        errorTitle = 'Session Not Ready';
+        errorMessage += data.requiresAction ? ` - ${data.requiresAction}` : '';
+      }
+      
+      showError(errorTitle, errorMessage);
     };
 
     // Listen for bulk message started
@@ -291,28 +300,28 @@ const CampaignComposer: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-        <h2 className="text-2xl font-bold text-white mb-2">Create Campaign</h2>
-        <p className="text-gray-400">
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Create Campaign</h2>
+        <p className="text-gray-600">
           Send messages to selected groups across {connectedSessions.length} WhatsApp accounts
         </p>
       </div>
 
       {/* Campaign Progress (shown during sending) */}
       {isSending && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center space-x-3 mb-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-400"></div>
-            <h3 className="text-lg font-semibold text-white">Sending Campaign...</h3>
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+            <h3 className="text-lg font-semibold text-gray-900">Sending Campaign...</h3>
           </div>
           
           <div className="space-y-3">
-            <div className="flex justify-between text-sm text-gray-300">
+            <div className="flex justify-between text-sm text-gray-600">
               <span>Progress: {sendingProgress.sent}/{sendingProgress.total}</span>
               <span>{Math.round(progressPercentage)}%</span>
             </div>
             
-            <div className="w-full bg-gray-700 rounded-full h-2">
+            <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
                 className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${progressPercentage}%` }}
@@ -320,7 +329,7 @@ const CampaignComposer: React.FC = () => {
             </div>
             
             {sendingProgress.currentGroup && (
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-gray-500">
                 Currently sending to: {sendingProgress.currentGroup}
               </p>
             )}
@@ -330,17 +339,17 @@ const CampaignComposer: React.FC = () => {
 
       {/* Campaign Results (shown after completion) */}
       {campaignResults.length > 0 && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Campaign Results</h3>
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaign Results</h3>
           <div className="space-y-2 max-h-40 overflow-y-auto">
             {campaignResults.map((result, index) => (
               <div key={index} className="flex items-center space-x-3 text-sm">
                 {result.success ? (
-                  <CheckCircle className="h-4 w-4 text-green-400" />
+                  <CheckCircle className="h-4 w-4 text-green-500" />
                 ) : (
-                  <AlertTriangle className="h-4 w-4 text-red-400" />
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
                 )}
-                <span className={result.success ? 'text-green-300' : 'text-red-300'}>
+                <span className={result.success ? 'text-green-600' : 'text-red-600'}>
                   Group {index + 1}: {result.success ? 'Sent' : `Failed - ${result.error}`}
                 </span>
               </div>
@@ -350,9 +359,9 @@ const CampaignComposer: React.FC = () => {
       )}
 
       {/* Campaign Settings */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-6">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             Campaign Name
           </label>
           <input
@@ -360,13 +369,13 @@ const CampaignComposer: React.FC = () => {
             value={campaignName}
             onChange={(e) => setCampaignName(e.target.value)}
             placeholder="Enter campaign name..."
-            className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isSending}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
             Message *
           </label>
           <textarea
@@ -374,10 +383,10 @@ const CampaignComposer: React.FC = () => {
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Write your promotional message here..."
             rows={6}
-            className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             disabled={isSending}
           />
-          <div className="flex justify-between text-sm text-gray-400 mt-2">
+          <div className="flex justify-between text-sm text-gray-500 mt-2">
             <span>{message.length} characters</span>
             <span>Recommended: Keep under 1000 characters</span>
           </div>
@@ -385,14 +394,14 @@ const CampaignComposer: React.FC = () => {
 
         {/* Media Upload */}
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-3">
+          <label className="block text-sm font-medium text-gray-700 mb-3">
             Attach Media (Optional)
           </label>
           <div className="flex space-x-3">
             <button
               onClick={() => handleMediaUpload('image')}
               disabled={isSending}
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Image className="h-5 w-5" />
               <span>Add Image</span>
@@ -400,7 +409,7 @@ const CampaignComposer: React.FC = () => {
             <button
               onClick={() => handleMediaUpload('video')}
               disabled={isSending}
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Video className="h-5 w-5" />
               <span>Add Video</span>
@@ -408,18 +417,18 @@ const CampaignComposer: React.FC = () => {
           </div>
           
           {mediaUrl && (
-            <div className="mt-3 p-3 bg-gray-900 rounded-lg">
+            <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex items-center space-x-2">
                 {mediaType === 'image' ? (
-                  <Image className="h-5 w-5 text-green-400" />
+                  <Image className="h-5 w-5 text-green-600" />
                 ) : (
-                  <Video className="h-5 w-5 text-green-400" />
+                  <Video className="h-5 w-5 text-green-600" />
                 )}
-                <span className="text-sm text-gray-300 truncate flex-1">{mediaUrl}</span>
+                <span className="text-sm text-gray-700 truncate flex-1">{mediaUrl}</span>
                 <button
                   onClick={handleRemoveMedia}
                   disabled={isSending}
-                  className="text-red-400 hover:text-red-300 text-sm px-2 py-1 rounded disabled:opacity-50"
+                  className="text-red-600 hover:text-red-700 text-sm px-2 py-1 rounded disabled:opacity-50"
                 >
                   Remove
                 </button>
@@ -430,15 +439,15 @@ const CampaignComposer: React.FC = () => {
       </div>
 
       {/* Sending Settings */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-6">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-6">
         <div className="flex items-center space-x-3">
-          <Settings className="h-6 w-6 text-blue-400" />
-          <h3 className="text-lg font-semibold text-white">Sending Settings</h3>
+          <Settings className="h-6 w-6 text-blue-600" />
+          <h3 className="text-lg font-semibold text-gray-900">Sending Settings</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Delay Between Messages (seconds)
             </label>
             <input
@@ -447,10 +456,10 @@ const CampaignComposer: React.FC = () => {
               max="60"
               value={delayBetweenMessages}
               onChange={(e) => setDelayBetweenMessages(parseInt(e.target.value) || 5)}
-              className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full bg-white border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={isSending}
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-gray-500 mt-1">
               Recommended: 5-10 seconds to avoid being blocked
             </p>
           </div>
@@ -462,9 +471,9 @@ const CampaignComposer: React.FC = () => {
                 checked={isScheduled}
                 onChange={(e) => setIsScheduled(e.target.checked)}
                 disabled={isSending}
-                className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                className="rounded border-gray-300 bg-white text-blue-600 focus:ring-blue-500 disabled:opacity-50"
               />
-              <span className="text-sm font-medium text-gray-300">Schedule Campaign</span>
+              <span className="text-sm font-medium text-gray-700">Schedule Campaign</span>
             </label>
             
             {isScheduled && (
@@ -475,14 +484,14 @@ const CampaignComposer: React.FC = () => {
                   onChange={(e) => setScheduledDate(e.target.value)}
                   min={new Date().toISOString().split('T')[0]}
                   disabled={isSending}
-                  className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                 />
                 <input
                   type="time"
                   value={scheduledTime}
                   onChange={(e) => setScheduledTime(e.target.value)}
                   disabled={isSending}
-                  className="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                 />
               </div>
             )}
@@ -492,21 +501,21 @@ const CampaignComposer: React.FC = () => {
 
       {/* Selected Groups Details */}
       {totalSelectedGroups > 0 && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center space-x-3 mb-4">
-            <CheckCircle className="h-6 w-6 text-green-400" />
-            <h3 className="text-lg font-semibold text-white">Selected Groups</h3>
+            <CheckCircle className="h-6 w-6 text-green-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Selected Groups</h3>
           </div>
           
           <div className="space-y-4">
             {sessionSelectionInfo.map((sessionInfo) => (
-              <div key={sessionInfo.sessionId} className="bg-gray-900 p-4 rounded-lg">
+              <div key={sessionInfo.sessionId} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center space-x-3">
-                    <Smartphone className="h-5 w-5 text-blue-400" />
-                    <span className="font-medium text-white">{sessionInfo.phoneNumber}</span>
+                    <Smartphone className="h-5 w-5 text-blue-600" />
+                    <span className="font-medium text-gray-900">{sessionInfo.phoneNumber}</span>
                   </div>
-                  <span className="text-sm text-gray-400">
+                  <span className="text-sm text-gray-600">
                     {sessionInfo.selectedCount}/{sessionInfo.totalGroups} groups
                   </span>
                 </div>
@@ -514,12 +523,12 @@ const CampaignComposer: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                   {sessionInfo.selectedGroups.slice(0, 6).map((group) => (
                     <div key={group.id} className="flex items-center space-x-2 text-sm">
-                      <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                      <span className="text-gray-300 truncate">{group.name}</span>
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-gray-700 truncate">{group.name}</span>
                     </div>
                   ))}
                   {sessionInfo.selectedGroups.length > 6 && (
-                    <div className="text-sm text-gray-400">
+                    <div className="text-sm text-gray-500">
                       +{sessionInfo.selectedGroups.length - 6} more groups
                     </div>
                   )}
@@ -531,38 +540,38 @@ const CampaignComposer: React.FC = () => {
       )}
 
       {/* Campaign Summary */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Campaign Summary</h3>
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Campaign Summary</h3>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-gray-900 p-4 rounded-lg">
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <div className="flex items-center space-x-3">
-              <Users className="h-6 w-6 text-blue-400" />
+              <Users className="h-6 w-6 text-blue-600" />
               <div>
-                <p className="text-sm text-gray-400">Target Groups</p>
-                <p className="text-xl font-bold text-white">{totalSelectedGroups}</p>
+                <p className="text-sm text-gray-600">Target Groups</p>
+                <p className="text-xl font-bold text-gray-900">{totalSelectedGroups}</p>
               </div>
             </div>
           </div>
           
-          <div className="bg-gray-900 p-4 rounded-lg">
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <div className="flex items-center space-x-3">
-              <Clock className="h-6 w-6 text-amber-400" />
+              <Clock className="h-6 w-6 text-amber-600" />
               <div>
-                <p className="text-sm text-gray-400">Estimated Time</p>
-                <p className="text-xl font-bold text-white">
+                <p className="text-sm text-gray-600">Estimated Time</p>
+                <p className="text-xl font-bold text-gray-900">
                   {Math.floor(estimatedTime / 60)}m {estimatedTime % 60}s
                 </p>
               </div>
             </div>
           </div>
           
-          <div className="bg-gray-900 p-4 rounded-lg">
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <div className="flex items-center space-x-3">
-              <Send className="h-6 w-6 text-green-400" />
+              <Send className="h-6 w-6 text-green-600" />
               <div>
-                <p className="text-sm text-gray-400">WhatsApp Accounts</p>
-                <p className="text-xl font-bold text-white">{connectedSessions.length}</p>
+                <p className="text-sm text-gray-600">WhatsApp Accounts</p>
+                <p className="text-xl font-bold text-gray-900">{connectedSessions.length}</p>
               </div>
             </div>
           </div>
@@ -570,12 +579,12 @@ const CampaignComposer: React.FC = () => {
 
         {/* Connection Status Warning */}
         {!socket && (
-          <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-3">
-              <AlertTriangle className="h-6 w-6 text-red-400" />
+              <AlertTriangle className="h-6 w-6 text-red-600" />
               <div>
-                <p className="font-medium text-red-400">No socket connection</p>
-                <p className="text-sm text-red-300">
+                <p className="font-medium text-red-800">No socket connection</p>
+                <p className="text-sm text-red-600">
                   Please refresh the page to establish connection with the server.
                 </p>
               </div>
@@ -585,12 +594,12 @@ const CampaignComposer: React.FC = () => {
 
         {/* Warning Messages */}
         {totalSelectedGroups === 0 && (
-          <div className="bg-amber-900/20 border border-amber-700 rounded-lg p-4 mb-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-3">
-              <AlertTriangle className="h-6 w-6 text-amber-400" />
+              <AlertTriangle className="h-6 w-6 text-amber-600" />
               <div>
-                <p className="font-medium text-amber-400">No groups selected</p>
-                <p className="text-sm text-amber-300">
+                <p className="font-medium text-amber-800">No groups selected</p>
+                <p className="text-sm text-amber-600">
                   Go to the Groups tab and select groups to send messages to.
                 </p>
               </div>
@@ -599,12 +608,12 @@ const CampaignComposer: React.FC = () => {
         )}
 
         {!message.trim() && (
-          <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-3">
-              <MessageSquare className="h-6 w-6 text-red-400" />
+              <MessageSquare className="h-6 w-6 text-red-600" />
               <div>
-                <p className="font-medium text-red-400">Message required</p>
-                <p className="text-sm text-red-300">
+                <p className="font-medium text-red-800">Message required</p>
+                <p className="text-sm text-red-600">
                   Please enter a message to send to the selected groups.
                 </p>
               </div>
@@ -613,12 +622,12 @@ const CampaignComposer: React.FC = () => {
         )}
 
         {isScheduled && (!scheduledDate || !scheduledTime) && (
-          <div className="bg-amber-900/20 border border-amber-700 rounded-lg p-4 mb-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-3">
-              <Clock className="h-6 w-6 text-amber-400" />
+              <Clock className="h-6 w-6 text-amber-600" />
               <div>
-                <p className="font-medium text-amber-400">Schedule incomplete</p>
-                <p className="text-sm text-amber-300">
+                <p className="font-medium text-amber-800">Schedule incomplete</p>
+                <p className="text-sm text-amber-600">
                   Please set both date and time for scheduled campaign.
                 </p>
               </div>
@@ -632,7 +641,7 @@ const CampaignComposer: React.FC = () => {
           className={`w-full flex items-center justify-center space-x-3 px-6 py-4 rounded-lg font-semibold text-white transition-colors ${
             canSendCampaign && (!isScheduled || (scheduledDate && scheduledTime))
               ? 'bg-blue-600 hover:bg-blue-700'
-              : 'bg-gray-600 cursor-not-allowed'
+              : 'bg-gray-400 cursor-not-allowed'
           }`}
         >
           {isSending ? (

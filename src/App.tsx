@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { CampaignProvider, useCampaign } from './contexts/CampaignContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
-import Dashboard from './components/Dashboard';
+import ModernDashboard from './components/ModernDashboard';
 import Login from './components/Login';
 import NotificationSystem from './components/NotificationSystem';
 import config from './config';
@@ -10,7 +10,7 @@ import './index.css';
 
 
 // Component that initializes the socket after CampaignProvider is ready
-function AuthenticatedApp() {
+function AuthenticatedApp({ user, onLogout }: { user: User, onLogout: () => void }) {
   const { initializeSocket, closeSocket } = useCampaign();
   
   useEffect(() => {
@@ -26,9 +26,9 @@ function AuthenticatedApp() {
   return (
     <NotificationProvider maxNotifications={10}>
       <Router>
-        <div className="min-h-screen bg-gray-900">
+        <div className="min-h-screen bg-gray-50">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<ModernDashboard user={user} onLogout={onLogout} />} />
           </Routes>
           <NotificationSystemWrapper />
         </div>
@@ -128,7 +128,7 @@ function App() {
       {!isAuthenticated ? (
         <Login onLogin={handleLogin} />
       ) : (
-        <AuthenticatedApp />
+        <AuthenticatedApp user={user!} onLogout={handleLogout} />
       )}
     </CampaignProvider>
   );

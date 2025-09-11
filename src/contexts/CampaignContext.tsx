@@ -63,9 +63,8 @@ function campaignReducer(state: CampaignState, action: CampaignAction): Campaign
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
     case 'UPDATE_SESSIONS':
-      // Filter out any disconnected sessions and merge with existing
-      const activeSessions = action.payload.filter(session => session.status !== 'disconnected');
-      return { ...state, sessions: activeSessions };
+      // Keep all sessions (including waiting_scan) for proper QR code display
+      return { ...state, sessions: action.payload };
     case 'UPDATE_SESSION':
       return {
         ...state,
@@ -191,8 +190,10 @@ function campaignReducer(state: CampaignState, action: CampaignAction): Campaign
 
 interface CampaignContextType extends CampaignState {
   createSession: () => void;
+  deleteSession: (sessionId: string) => void;
   disconnectSession: (sessionId: string) => void;
   logoutSession: (sessionId: string) => void;
+  reconnectSession: (sessionId: string) => void;
   logoutAllSessions: () => void;
   refreshGroups: (sessionId: string) => void;
   toggleGroupSelection: (sessionId: string, groupId: string) => void;
@@ -313,7 +314,6 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
     socket.on('sessions-data', (sessions: any[]) => {
       console.log('Received sessions data:', sessions);
       const formattedSessions: WhatsAppSession[] = sessions
-        .filter(session => session.status !== 'disconnected') // Filter out disconnected
         .map(session => ({
           id: session.id,
           status: session.status,
@@ -407,17 +407,36 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
     // Handle authentication success
     socket.on('authenticated', (data: any) => {
       console.log('✅ Session authenticated, clearing QR code:', data);
-      dispatch({
-        type: 'UPDATE_SESSION',
-        payload: {
-          sessionId: data.sessionId,
-          updates: {
-            status: 'authenticated',
-            qrCode: undefined,
-            phoneNumber: data.phoneNumber,
+      
+      // Check if session exists in current state, if not add it
+      const existingSession = state.sessions.find(s => s.id === data.sessionId);
+      
+      if (!existingSession) {
+        console.log('🆕 Adding reconnected session to UI:', data.sessionId);
+        const newSession = {
+          id: data.sessionId,
+          status: 'authenticated' as const,
+          phoneNumber: data.phoneNumber,
+          qrCode: undefined,
+          groups: [],
+          lastActivity: new Date(),
+          groupsLoaded: false,
+          groupsLoading: false,
+        };
+        dispatch({ type: 'ADD_SESSION', payload: newSession as WhatsAppSession });
+      } else {
+        dispatch({
+          type: 'UPDATE_SESSION',
+          payload: {
+            sessionId: data.sessionId,
+            updates: {
+              status: 'authenticated',
+              qrCode: undefined,
+              phoneNumber: data.phoneNumber,
+            },
           },
-        },
-      });
+        });
+      }
       
       // Set a timeout to check if groups are loaded, if not force ready
       setTimeout(() => {
@@ -450,17 +469,37 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
     // Handle session ready (connected)
     socket.on('session-ready', (data: any) => {
       console.log('🚀 Session ready:', data);
-      dispatch({
-        type: 'UPDATE_SESSION',
-        payload: {
-          sessionId: data.sessionId,
-          updates: {
-            status: 'connected',
-            qrCode: undefined,
-            phoneNumber: data.phoneNumber,
+      
+      // Check if session exists in current state, if not add it
+      const existingSession = state.sessions.find(s => s.id === data.sessionId);
+      
+      if (!existingSession) {
+        console.log('🆕 Adding ready session to UI:', data.sessionId);
+        const newSession = {
+          id: data.sessionId,
+          status: 'connected' as const,
+          phoneNumber: data.phoneNumber,
+          qrCode: undefined,
+          groups: data.groups || [],
+          lastActivity: new Date(),
+          groupsLoaded: true,
+          groupsLoading: false,
+        };
+        dispatch({ type: 'ADD_SESSION', payload: newSession as WhatsAppSession });
+      } else {
+        dispatch({
+          type: 'UPDATE_SESSION',
+          payload: {
+            sessionId: data.sessionId,
+            updates: {
+              status: 'connected',
+              qrCode: undefined,
+              phoneNumber: data.phoneNumber,
+              groups: data.groups || existingSession.groups,
+            },
           },
-        },
-      });
+        });
+      }
     });
 
     // Handle session updates
@@ -773,38 +812,67 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
     }
   };
 
-  const disconnectSession = (sessionId: string) => {
-    console.log('Disconnecting session:', sessionId);
+  // Permanent deletion - removes session entirely
+  const deleteSession = (sessionId: string) => {
+    console.log('Permanently deleting session:', sessionId);
     
-    if (!confirm('Are you sure you want to disconnect this WhatsApp session? This will permanently remove all data.')) {
+    if (!confirm('Are you sure you want to permanently DELETE this WhatsApp session? This will remove all data and cannot be undone.')) {
       return;
     }
 
-    // Immediately update UI to show disconnecting state
+    // Remove from UI immediately
+    dispatch({ type: 'REMOVE_SESSION', payload: sessionId });
+
+    if (state.socket) {
+      state.socket.emit('disconnect-session', { sessionId });
+    }
+  };
+
+  // Temporary disconnection - keeps session but disconnects WhatsApp  
+  const disconnectSession = (sessionId: string) => {
+    console.log('Disconnecting session (temporary):', sessionId);
+    
+    if (!confirm('Are you sure you want to disconnect this WhatsApp session? You can reconnect it later.')) {
+      return;
+    }
+
+    // For disconnect - only change status to disconnected, but keep session
     dispatch({
       type: 'UPDATE_SESSION',
       payload: {
         sessionId,
         updates: {
           status: 'disconnected',
+          qrCode: undefined,
+          groups: [], // Clear groups but keep session
         },
       },
     });
 
     if (state.socket) {
-      state.socket.emit('disconnect-session', { sessionId });
-    } else {
-      // If no socket connection, remove immediately
-      dispatch({ type: 'REMOVE_SESSION', payload: sessionId });
+      state.socket.emit('logout-session', { sessionId });
     }
   };
 
   const logoutSession = useCallback((sessionId: string) => {
-    console.log('Logging out session:', sessionId);
+    console.log('Logging out session (keep session, only disconnect WhatsApp):', sessionId);
     
-    if (!confirm('Are you sure you want to logout this WhatsApp session? You will need to scan QR code again.')) {
+    if (!confirm('Are you sure you want to logout this WhatsApp session? The session will be kept but you will need to scan QR code to reconnect.')) {
       return;
     }
+
+    // For logout - only change status to disconnected, but keep session
+    dispatch({
+      type: 'UPDATE_SESSION',
+      payload: {
+        sessionId,
+        updates: {
+          status: 'disconnected',
+          qrCode: undefined,
+          groups: [], // Clear groups but keep session
+        },
+      },
+    });
 
     // Emit logout event to server
     if (state.socket) {
@@ -813,6 +881,34 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
       console.error('No socket connection available for logout');
     }
   }, [state.socket]);
+
+  const reconnectSession = useCallback((sessionId: string) => {
+    console.log('Reconnecting session:', sessionId);
+    
+    if (!state.isConnected) {
+      alert('Not connected to server. Please wait...');
+      return;
+    }
+
+    // Update session status to initializing
+    dispatch({
+      type: 'UPDATE_SESSION',
+      payload: {
+        sessionId,
+        updates: {
+          status: 'initializing',
+          qrCode: undefined,
+        },
+      },
+    });
+
+    // Emit reconnect event to server
+    if (state.socket) {
+      state.socket.emit('reconnect-session', { sessionId });
+    } else {
+      console.error('No socket connection available for reconnect');
+    }
+  }, [state.socket, state.isConnected]);
 
   const logoutAllSessions = useCallback(() => {
     console.log('Logging out all sessions');
@@ -861,6 +957,34 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
       state.socket.emit('refresh-groups', { sessionId });
     }
   };
+
+  // Add session limit checking in frontend
+  const checkSessionLimits = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${config.API_BASE_URL}/api/sessions/stats`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        const { user } = data.data;
+        
+        if (!user.canCreate) {
+          alert(`Session Limit Reached: You have reached the maximum of ${user.maxSessions} sessions. Please delete an existing session before creating a new one.`);
+        }
+        
+        return user.canCreate;
+      }
+    } catch (error) {
+      console.error('Error checking session limits:', error);
+    }
+    return true;
+  }, []);
 
   useEffect(() => {
     if (!state.socket) return;
@@ -973,7 +1097,9 @@ export const CampaignProvider: React.FC<CampaignProviderProps> = ({ children }) 
     selectAllGroups,
     createSession,
     disconnectSession,
+    deleteSession,
     logoutSession,
+    reconnectSession,
     logoutAllSessions,
     refreshGroups,
     getSelectedGroups,

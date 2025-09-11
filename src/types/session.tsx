@@ -11,6 +11,7 @@ export interface WhatsAppGroup {
 
 export interface WhatsAppSession {
   id: string;
+  sessionId?: string; // Backend compatibility
   name: string;
   phoneNumber?: string;
   status: 'initializing' | 'qr_generated' | 'authenticated' | 'connected' | 'disconnected' | 'error';

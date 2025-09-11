@@ -158,8 +158,8 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center space-x-3">
               <Users className="h-6 w-6 text-blue-400" />
               <div>
-                <p className="text-sm text-gray-400">Total Groups</p>
-                <p className="text-xl font-bold">{totalGroups}</p>
+                <p className="text-sm text-white-400">Total Groups</p>
+                <p className="text-xl  text-white font-bold">{totalGroups}</p>
               </div>
             </div>
           </div>
@@ -168,8 +168,8 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center space-x-3">
               <AlertCircle className="h-6 w-6 text-amber-400" />
               <div>
-                <p className="text-sm text-gray-400">Selected Groups</p>
-                <p className="text-xl font-bold">{selectedGroups}</p>
+                <p className="text-sm text-white">Selected Groups</p>
+                <p className="text-xl text-white font-bold">{selectedGroups}</p>
               </div>
             </div>
           </div>
@@ -243,7 +243,7 @@ const Dashboard: React.FC = () => {
                         <Smartphone className="h-6 w-6 text-blue-400" />
                         <div>
                           <h3 className="font-semibold text-white">
-                            {session.phoneNumber ? `+${session.phoneNumber}` : session.id.slice(-8)}
+                            {session.phoneNumber ? `+${session.phoneNumber}` : session.id?.slice(-8) || 'Unknown'}
                           </h3>
                           <p className="text-sm text-gray-400 capitalize">{session.status.replace('_', ' ')}</p>
                         </div>
@@ -384,7 +384,7 @@ const Dashboard: React.FC = () => {
                     {/* Session Footer */}
                     <div className="mt-4 pt-3 border-t border-gray-700">
                       <div className="flex items-center justify-between text-xs text-gray-500">
-                        <span>Session ID: {session.id.slice(-8)}</span>
+                        <span>Session ID: {session.id?.slice(-8) || 'Unknown'}</span>
                         {session.lastActivity && (
                           <span>
                             Last active: {new Date(session.lastActivity).toLocaleTimeString()}
