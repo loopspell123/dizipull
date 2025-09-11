@@ -1038,8 +1038,7 @@ app.post('/api/sessions/cleanup', authenticateToken, async (req, res) => {
 });
 
 // Frontend serving configuration
-const frontendBuildPath = path.join(__dirname, '..', 'dist');
-
+const frontendBuildPath = path.join(__dirname, 'dist');
 if (fs.existsSync(frontendBuildPath)) {
   app.use(express.static(frontendBuildPath));
   console.log(`Serving frontend from: ${frontendBuildPath}`);
