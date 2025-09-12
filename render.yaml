@@ -18,14 +18,7 @@ services:
         value: https://digihub-fortend.onrender.com
       - key: FRONTEND_URL
         value: https://digihub-fortend.onrender.com
-    # Add environment variables from dashboard:
-    # - MONGODB_URI
-    # - JWT_SECRET  
-    # - DEFAULT_ADMIN_USERNAME
-    # - DEFAULT_ADMIN_EMAIL
-    # - DEFAULT_PASSWORD
-    
-  # Frontend service - deployed to dizihub.onrender.com  
+   
   - type: static
     name: whatsapp-frontend
     buildCommand: npm run build

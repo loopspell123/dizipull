@@ -8,13 +8,13 @@ interface Config {
 const config: Config = {
   API_BASE_URL: import.meta.env.VITE_API_URL || 
     (import.meta.env.VITE_NODE_ENV === 'production' 
-      ? "https://digihub-backend-axps.onrender.com" 
+      ? "https://digihub-new.onrender.com" 
       : "http://localhost:3001"),
   
   SOCKET_URL: import.meta.env.VITE_WS_URL || 
     (import.meta.env.VITE_NODE_ENV === 'production' 
-      ? "https://digihub-backend-axps.onrender.com" 
-      : "http://localhost:3001"),
+      ? "wss://digihub-new.onrender.com" 
+      : "ws://localhost:3001"),
       
   NODE_ENV: import.meta.env.VITE_NODE_ENV || 'development'
 };
