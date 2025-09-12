@@ -10,7 +10,7 @@
     "client": "vite",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "build": "npm run build:frontend",
-    "build:frontend": "vite build --outDir server/dist",
+    "build:frontend": "vite build --outDir ",
     "preview": "vite preview --host 0.0.0.0 --port $PORT",
     "kill-port": "node -e \"import('./server/utils/portCheck.js').then(m => m.killPort(3001)).then(() => console.log('Port 3001 cleared')).catch(e => console.error('Error:', e.message))\"",
     "restart": "npm run kill-port && sleep 2 && npm run dev",
